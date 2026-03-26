@@ -150,8 +150,7 @@ export default function JobScorer() {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      fullText += content.items.map((item) => item.str).join(" ") + "
-";
+      fullText += content.items.map((item) => item.str).join(" ") + "\n";
     }
     return fullText;
   };

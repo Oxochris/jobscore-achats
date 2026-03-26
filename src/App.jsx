@@ -134,13 +134,39 @@ export default function JobScorer() {
   const [activeTab, setActiveTab] = useState("scorer");
   const fileRef = useRef(null);
 
-  const readFile = (file) => {
+  const extractPdfText = async (arrayBuffer) => {
+    if (!window.pdfjsLib) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        script.onload = resolve; script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map((item) => item.str).join(" ") + "
+";
+    }
+    return fullText;
+  };
+
+  const readFile = async (file) => {
     if (!file) return;
     setResult(null); setError(null);
     if (file.type === "application/pdf") {
-      const reader = new FileReader();
-      reader.onload = (e) => setFileData({ name: file.name, isPdf: true, base64: e.target.result.split(",")[1] });
-      reader.readAsDataURL(file);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const text = await extractPdfText(arrayBuffer);
+        setFileData({ name: file.name, isPdf: false, text });
+      } catch {
+        setError("Impossible de lire ce PDF. Essayez de le convertir en TXT.");
+      }
     } else {
       const reader = new FileReader();
       reader.onload = (e) => setFileData({ name: file.name, isPdf: false, text: e.target.result });
@@ -156,15 +182,9 @@ export default function JobScorer() {
     if (!hasContent) return;
     setLoading(true); setResult(null); setError(null);
     try {
-      let messages;
-      if (mode === "upload" && fileData?.isPdf) {
-        messages = [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: fileData.base64 } }, { type: "text", text: "Analyse cette offre d'emploi." }] }];
-      } else {
-        const content = mode === "paste" ? text : fileData?.text || "";
-        messages = [{ role: "user", content: `Analyse cette offre d'emploi :\n\n${content}` }];
-      }
+      const content = mode === "paste" ? text : fileData?.text || "";
+      const messages = [{ role: "user", content: `Analyse cette offre d'emploi :\n\n${content}` }];
       const body = { model: "claude-sonnet-4-20250514", max_tokens: 1000, system: SYSTEM_PROMPT, messages };
-      if (mode === "upload" && fileData?.isPdf) body.betas = ["pdfs-2024-09-25"];
       const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
       const raw = data.content?.[0]?.text || "";
